@@ -1,0 +1,19 @@
+project: HetGAT-HRL
+stage: step1_mdp_smdp
+
+env:
+  phase: S
+  scenario: B
+  num_trucks: 2
+  num_uavs: 3
+  max_steps: 300
+  dt_seconds: 20.0
+  hrl_interval: 10
+  risk_spike_threshold: 0.30
+
+design:
+  low_level: MDP
+  high_level: SMDP
+  trigger: ["interval", "risk_spike"]
+  reward_scope: "per_agent"
+

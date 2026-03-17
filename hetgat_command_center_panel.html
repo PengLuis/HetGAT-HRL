@@ -1,0 +1,1023 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>HetGAT-HRL 指挥可视化面板</title>
+  <style>
+    :root {
+      --bg:#18181b; --panel:#252526; --panel2:#2a2a2d; --line:#3f3f46;
+      --text:#e5e7eb; --muted:#9ca3af; --blue:#38bdf8; --green:#34d399;
+      --amber:#f59e0b; --red:#ef4444; --top:56px;
+    }
+    * { box-sizing:border-box; }
+    html, body { width:100%; height:100%; margin:0; overflow:hidden; background:var(--bg); color:var(--text); font-family:"Microsoft YaHei","PingFang SC",sans-serif; }
+    .top { height:var(--top); display:flex; align-items:center; gap:8px; padding:10px 12px; border-bottom:1px solid var(--line); background:#1f1f23; }
+    .btn { background:#2a2a31; border:1px solid #3b3b42; color:var(--text); border-radius:8px; padding:6px 10px; cursor:pointer; }
+    .btn:hover { background:#33333c; }
+    .btn-toggle { min-width:56px; text-align:center; }
+    .btn-toggle.active { border-color:#0ea5e9; box-shadow:inset 0 0 0 1px rgba(14,165,233,.35); background:#163244; color:#dbeafe; }
+    .sp { flex:1; }
+    .main { height:calc(100% - var(--top)); display:flex; }
+    #left, #right { background:var(--panel); overflow:auto; padding:10px; }
+    #left { width:320px; min-width:220px; max-width:560px; border-right:1px solid var(--line); }
+    #right { width:360px; min-width:250px; max-width:560px; border-left:1px solid var(--line); }
+    #center { flex:1; position:relative; background:#141417; }
+    .split { width:8px; background:#2b2b30; cursor:col-resize; }
+    #mapCanvas { width:100%; height:100%; display:block; cursor:grab; }
+    #mapCanvas.drag { cursor:grabbing; }
+    .hint { position:absolute; right:10px; bottom:10px; font-size:12px; color:#cbd5e1; background:rgba(0,0,0,.45); border:1px solid var(--line); border-radius:8px; padding:5px 8px; }
+    .card { background:var(--panel2); border:1px solid #3a3a42; border-radius:12px; padding:10px; margin-bottom:10px; }
+    .card h3 { margin:0 0 8px 0; font-size:14px; }
+    .kv { display:grid; grid-template-columns:1fr auto; gap:8px; font-size:13px; padding:2px 0; }
+    .k { color:var(--muted); }
+    .v { font-weight:600; }
+    .chip { display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; border:1px solid #4b5563; background:#2e3239; }
+    .ok { color:#6ee7b7; border-color:#065f46; background:#052e27; }
+    .warn { color:#fbbf24; border-color:#92400e; background:#3b2608; }
+    .danger { color:#fca5a5; border-color:#7f1d1d; background:#3b0f0f; }
+    .prog { height:12px; border-radius:999px; overflow:hidden; border:1px solid #374151; background:#1f2937; }
+    .bar { height:100%; width:0%; }
+    .bar-blue { background:linear-gradient(90deg,#0ea5e9,#38bdf8); }
+    .bar-red { background:linear-gradient(90deg,#f97316,#ef4444); }
+    .bar-green { background:linear-gradient(90deg,#10b981,#34d399); }
+    .bar-amber { background:linear-gradient(90deg,#f59e0b,#fbbf24); }
+    .bar-danger { background:linear-gradient(90deg,#dc2626,#ef4444); }
+    .event-list { display:flex; flex-direction:column; gap:6px; }
+    .event-item { font-size:12px; line-height:1.35; padding:6px 8px; border:1px solid #3a3f49; border-radius:8px; background:#1f232a; }
+    .event-item strong { color:#f8fafc; }
+    .event-none { color:#94a3b8; font-size:12px; }
+  </style>
+</head>
+<body>
+  <div class="top">
+    <b>HetGAT-HRL 指挥中心</b>
+    <button class="btn" id="btnPrev">[ &lt; 上一步 ]</button>
+    <button class="btn" id="btnPlay">[ 播放 ]</button>
+    <button class="btn" id="btnNext">[ 下一步 &gt; ]</button>
+    <span id="stepText">Step: 0 / 0</span>
+    <span style="margin-left:8px;color:#94a3b8;">图层</span>
+    <button class="btn btn-toggle active" id="btnLayerRain">雨层</button>
+    <button class="btn btn-toggle active" id="btnLayerWind">风层</button>
+    <button class="btn btn-toggle active" id="btnLayerQuake">震层</button>
+    <span class="sp"></span>
+    <label>缩放</label>
+    <input id="zoomRange" type="range" min="0.35" max="3" step="0.01" value="1" />
+    <span id="zoomText">100%</span>
+  </div>
+
+  <div class="main" id="mainWrap">
+    <aside id="left">
+      <div class="card">
+        <h3>全局环境气象</h3>
+        <div class="kv"><div class="k">降雨 (mm/h)</div><div class="v" id="rain">-</div></div>
+        <div class="kv"><div class="k">风速 (m/s)</div><div class="v" id="wind">-</div></div>
+        <div class="kv"><div class="k">通信阻断率</div><div class="v" id="comm">-</div></div>
+        <div class="kv"><div class="k">Risk Spike</div><div class="v"><span class="chip" id="risk">-</span></div></div>
+      </div>
+
+      <div class="card">
+        <h3>任务进度</h3>
+        <div class="kv"><div class="k">普通任务</div><div class="v" id="normalText">0/0</div></div>
+        <div class="prog"><div class="bar bar-blue" id="normalBar"></div></div>
+        <div style="height:8px"></div>
+        <div class="kv"><div class="k">紧急任务</div><div class="v" id="emerText">0/0</div></div>
+        <div class="prog"><div class="bar bar-red" id="emerBar"></div></div>
+      </div>
+
+      <div class="card">
+        <h3>协同指标</h3>
+        <div class="kv"><div class="k">停靠充电次数</div><div class="v" id="dock">-</div></div>
+        <div class="kv"><div class="k">平均奖励</div><div class="v" id="reward">-</div></div>
+        <div class="kv"><div class="k">无效动作次数</div><div class="v" id="invalid">-</div></div>
+      </div>
+    </aside>
+
+    <div class="split" id="splitLeft"></div>
+    <main id="center">
+      <canvas id="mapCanvas"></canvas>
+      <div class="hint">左键拖拽平移 / 滚轮缩放 / 点击实体查看详情</div>
+    </main>
+    <div class="split" id="splitRight"></div>
+
+    <aside id="right">
+      <div class="card">
+        <h3>实体详情监控</h3>
+        <div id="inspector" style="color:#9ca3af;font-size:13px;">请在地图上点击实体查看状态。</div>
+      </div>
+      <div class="card">
+        <h3>智能体动作</h3>
+        <div id="agentActions" class="event-none">暂无动作数据。</div>
+      </div>
+      <div class="card">
+        <h3>关键事件</h3>
+        <div id="keyEvents" class="event-none">本步无关键事件。</div>
+      </div>
+      <div class="card">
+        <h3>任务状态图例</h3>
+        <div class="kv"><div class="k">待执行</div><div class="v"><span class="chip danger">红色</span></div></div>
+        <div class="kv"><div class="k">交付中</div><div class="v"><span class="chip warn">黄色</span></div></div>
+        <div class="kv"><div class="k">已完成</div><div class="v"><span class="chip ok">绿色</span></div></div>
+      </div>
+    </aside>
+  </div>
+
+  <script>
+    (function(){
+      function el(id){ return document.getElementById(id); }
+      var D = {
+        btnPrev: el('btnPrev'), btnPlay: el('btnPlay'), btnNext: el('btnNext'),
+        btnLayerRain: el('btnLayerRain'), btnLayerWind: el('btnLayerWind'), btnLayerQuake: el('btnLayerQuake'),
+        stepText: el('stepText'), zoomRange: el('zoomRange'), zoomText: el('zoomText'),
+        canvas: el('mapCanvas'), inspector: el('inspector'), keyEvents: el('keyEvents'), agentActions: el('agentActions'),
+        rain: el('rain'), wind: el('wind'), comm: el('comm'), risk: el('risk'),
+        normalText: el('normalText'), emerText: el('emerText'), normalBar: el('normalBar'), emerBar: el('emerBar'),
+        dock: el('dock'), reward: el('reward'), invalid: el('invalid'),
+        left: el('left'), right: el('right'), mainWrap: el('mainWrap'), splitLeft: el('splitLeft'), splitRight: el('splitRight')
+      };
+
+      var S = {
+        frames: [], idx: 0, playing: false, timer: null,
+        selected: null, hits: [],
+        view: { zoom: 1, panX: 0, panY: 0 },
+        bounds: null,
+        layers: { rain:true, wind:true, quake:true }
+      };
+
+      var ctx = D.canvas.getContext('2d');
+
+      function clamp(v, a, b){ return Math.max(a, Math.min(b, v)); }
+      function fmt(v, n){ return Number(v).toFixed(n || 2); }
+      function pct(v){ return (100 * Number(v || 0)).toFixed(1) + '%'; }
+      function dist2(x1,y1,x2,y2){ var dx=x1-x2,dy=y1-y2; return dx*dx+dy*dy; }
+
+      function worldToScreen(x,y){
+        var b=S.bounds, cw=D.canvas.clientWidth, ch=D.canvas.clientHeight;
+        var mw=Math.max(1e-6,b.maxX-b.minX), mh=Math.max(1e-6,b.maxY-b.minY);
+        var fit=0.88*Math.min(cw/mw,ch/mh), scale=fit*S.view.zoom;
+        var cx=0.5*(b.minX+b.maxX), cy=0.5*(b.minY+b.maxY);
+        return { x:(x-cx)*scale+cw*0.5+S.view.panX, y:(y-cy)*scale+ch*0.5+S.view.panY, scale:scale };
+      }
+
+      function screenToWorld(sx,sy){
+        var b=S.bounds, cw=D.canvas.clientWidth, ch=D.canvas.clientHeight;
+        var mw=Math.max(1e-6,b.maxX-b.minX), mh=Math.max(1e-6,b.maxY-b.minY);
+        var fit=0.88*Math.min(cw/mw,ch/mh), scale=fit*S.view.zoom;
+        var cx=0.5*(b.minX+b.maxX), cy=0.5*(b.minY+b.maxY);
+        return { x:(sx-cw*0.5-S.view.panX)/scale+cx, y:(sy-ch*0.5-S.view.panY)/scale+cy };
+      }
+
+      function resizeCanvas(){
+        var r=D.canvas.getBoundingClientRect(), dpr=window.devicePixelRatio||1;
+        D.canvas.width=Math.max(1,Math.floor(r.width*dpr));
+        D.canvas.height=Math.max(1,Math.floor(r.height*dpr));
+        ctx.setTransform(dpr,0,0,dpr,0,0);
+        render();
+      }
+
+      function clearCanvas(){
+        var w=D.canvas.clientWidth,h=D.canvas.clientHeight;
+        ctx.clearRect(0,0,w,h);
+        ctx.fillStyle='#141417';
+        ctx.fillRect(0,0,w,h);
+        ctx.strokeStyle='rgba(255,255,255,.04)';
+        for(var x=0;x<w;x+=48){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,h); ctx.stroke(); }
+        for(var y=0;y<h;y+=48){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(w,y); ctx.stroke(); }
+      }
+
+      function nodeById(f,id){
+        for(var i=0;i<f.nodes.length;i++){ if(Number(f.nodes[i].id)===Number(id)) return f.nodes[i]; }
+        return null;
+      }
+
+      function nearestPointOnSeg(px,py,ax,ay,bx,by){
+        var vx=bx-ax, vy=by-ay, wx=px-ax, wy=py-ay;
+        var vv=vx*vx+vy*vy;
+        var t=vv<=1e-9?0:clamp((wx*vx+wy*vy)/vv,0,1);
+        var x=ax+t*vx, y=ay+t*vy, dx=px-x, dy=py-y;
+        return {x:x,y:y,d:dx*dx+dy*dy};
+      }
+
+      function truckWorldPos(a,f){
+        if(Number.isFinite(a.x) && Number.isFinite(a.y)){
+          return {x:Number(a.x), y:Number(a.y)};
+        }
+        if(Array.isArray(a.transit) && a.transit.length>=2){
+          var n1=nodeById(f,a.transit[0]), n2=nodeById(f,a.transit[1]);
+          if(n1&&n2){
+            var t1=Number.isFinite(a.progress)?clamp(Number(a.progress),0,1):0.5;
+            return {x:n1.x+t1*(n2.x-n1.x), y:n1.y+t1*(n2.y-n1.y)};
+          }
+        }
+        if(Number.isFinite(a.node) && Number.isFinite(a.targetNode)){
+          var a1=nodeById(f,a.node), a2=nodeById(f,a.targetNode);
+          if(a1&&a2){
+            var t2=Number.isFinite(a.progress)?clamp(Number(a.progress),0,1):0;
+            return {x:a1.x+t2*(a2.x-a1.x), y:a1.y+t2*(a2.y-a1.y)};
+          }
+        }
+        if(Number.isFinite(a.node)){
+          var n=nodeById(f,a.node);
+          if(n) return {x:n.x,y:n.y};
+        }
+        return {x:0,y:0};
+      }
+
+      function agentWorldPos(a,f){
+        if(a.type==='truck' || a.kind==='truck') return truckWorldPos(a,f);
+        if(Number.isFinite(a.x) && Number.isFinite(a.y)) return {x:Number(a.x),y:Number(a.y)};
+        if(Array.isArray(a.pos_xy) && a.pos_xy.length>=2) return {x:Number(a.pos_xy[0]),y:Number(a.pos_xy[1])};
+        var d=nodeById(f,0); return d?{x:d.x,y:d.y}:{x:0,y:0};
+      }
+
+      function drawEdge(e,f){
+        var n1=nodeById(f,e.a), n2=nodeById(f,e.b); if(!n1||!n2) return;
+        var p1=worldToScreen(n1.x,n1.y), p2=worldToScreen(n2.x,n2.y);
+        var selected=S.selected && S.selected.kind==='edge' && S.selected.id===e.id;
+        ctx.save();
+        if(e.blocked){ ctx.strokeStyle=selected?'#fca5a5':'#ef4444'; ctx.setLineDash([7,5]); ctx.lineWidth=selected?2.8:1.8; }
+        else { ctx.strokeStyle=selected?'#bae6fd':'rgba(203,213,225,.40)'; ctx.setLineDash([]); ctx.lineWidth=selected?2.4:1.2; }
+        ctx.beginPath(); ctx.moveTo(p1.x,p1.y); ctx.lineTo(p2.x,p2.y); ctx.stroke(); ctx.restore();
+
+        var mx=(p1.x+p2.x)/2, my=(p1.y+p2.y)/2;
+        if(e.blocked){
+          ctx.save();
+          ctx.fillStyle='#ef4444';
+          ctx.font='bold 12px Microsoft YaHei';
+          ctx.fillText('\u26D4', mx-7, my+4);
+          ctx.restore();
+        }
+
+        S.hits.push({kind:'edge',id:e.id,x:mx,y:my,r:8});
+      }
+
+      function drawNode(n){
+        var p=worldToScreen(n.x,n.y);
+        var selected=S.selected && S.selected.kind==='node' && S.selected.id===n.id;
+        ctx.save();
+        if(Number(n.id)===0){
+          ctx.fillStyle='rgba(56,189,248,.28)'; ctx.beginPath(); ctx.arc(p.x,p.y,16,0,Math.PI*2); ctx.fill();
+          ctx.strokeStyle=selected?'#fef08a':'#38bdf8'; ctx.lineWidth=selected?3:2; ctx.beginPath(); ctx.arc(p.x,p.y,14,0,Math.PI*2); ctx.stroke();
+          ctx.fillStyle='#e2e8f0'; ctx.font='bold 12px Microsoft YaHei'; ctx.fillText('仓库',p.x-12,p.y+4);
+        } else {
+          ctx.fillStyle=selected?'#fef3c7':'#9ca3af'; ctx.beginPath(); ctx.arc(p.x,p.y,selected?4.5:3.2,0,Math.PI*2); ctx.fill();
+        }
+        ctx.restore();
+        S.hits.push({kind:'node',id:n.id,x:p.x,y:p.y,r:Number(n.id)===0?18:8});
+      }
+
+      function sampleWeatherIDW(f, wx, wy){
+        var nodes = (f && Array.isArray(f.nodes)) ? f.nodes : [];
+        if(!nodes.length) return {rain:0, wind:0, vx:0, vy:0};
+        var sw=0, sr=0, sm=0, sx=0, sy=0;
+        for(var i=0;i<nodes.length;i++){
+          var n=nodes[i];
+          var dx=wx-Number(n.x||0), dy=wy-Number(n.y||0);
+          var d2=dx*dx+dy*dy+1.0;
+          var w=1.0/d2;
+          sw+=w; sr+=w*Number(n.rain||0); sm+=w*Number(n.wind||0);
+          sx+=w*Number(n.wx||0); sy+=w*Number(n.wy||0);
+        }
+        if(sw<=1e-12) return {rain:0, wind:0, vx:0, vy:0};
+        return {rain:sr/sw, wind:sm/sw, vx:sx/sw, vy:sy/sw};
+      }
+
+      function drawRainLayer(f, stepIdx){
+        var b=S.bounds; if(!b) return;
+        var nx=22, ny=22;
+        var dx=(b.maxX-b.minX)/nx, dy=(b.maxY-b.minY)/ny;
+        var rainMax=0;
+        for(var i=0;i<f.nodes.length;i++) rainMax=Math.max(rainMax, Number(f.nodes[i].rain||0));
+        rainMax=Math.max(rainMax, Number(f.weather&&f.weather.rainfall||0), 1.0);
+
+        ctx.save();
+        ctx.globalCompositeOperation='source-over';
+        for(var ix=0; ix<nx; ix++){
+          for(var iy=0; iy<ny; iy++){
+            var wx=b.minX + (ix+0.5)*dx;
+            var wy=b.minY + (iy+0.5)*dy;
+            var sw=sampleWeatherIDW(f, wx, wy);
+            var rn=clamp(sw.rain/rainMax, 0, 1);
+            if(rn<=0.03) continue;
+            var a=0.04 + 0.28*rn;
+            var p0=worldToScreen(wx-dx*0.5, wy-dy*0.5);
+            var p1=worldToScreen(wx+dx*0.5, wy+dy*0.5);
+            var w=Math.abs(p1.x-p0.x), h=Math.abs(p1.y-p0.y);
+            var x=Math.min(p0.x,p1.x), y=Math.min(p0.y,p1.y);
+            var blue=160 + Math.round(80*rn);
+            ctx.fillStyle='rgba(59,130,'+String(blue)+','+a.toFixed(3)+')';
+            ctx.fillRect(x,y,w+0.6,h+0.6);
+          }
+        }
+        ctx.restore();
+      }
+
+      function drawGlobalHazardFields(f, stepIdx){
+        if(!f || !f.weather) return;
+        var storm = f.weather.stormCenter;
+        var rmw = Number(f.weather.rmw||0);
+        var quake = f.weather.quakeEpicenter;
+
+        // 台风连续场：风眼透明，RMW附近厚重雨带。
+        if((S.layers.rain || S.layers.wind) && Array.isArray(storm) && storm.length>=2 && rmw>1){
+          var cx=Number(storm[0]), cy=Number(storm[1]);
+          var pc=worldToScreen(cx,cy);
+          var rmwPx=Math.abs(worldToScreen(cx+rmw,cy).x - pc.x);
+          rmwPx=Math.max(18, rmwPx);
+          var outer=rmwPx*2.9;
+
+          ctx.save();
+          ctx.globalCompositeOperation='screen';
+
+          var gBody=ctx.createRadialGradient(pc.x,pc.y,rmwPx*0.25,pc.x,pc.y,outer);
+          gBody.addColorStop(0.00,'rgba(255,255,255,0.00)');
+          gBody.addColorStop(0.22,'rgba(186,230,253,0.05)');
+          gBody.addColorStop(0.45,'rgba(125,211,252,0.18)');
+          gBody.addColorStop(0.72,'rgba(56,189,248,0.09)');
+          gBody.addColorStop(1.00,'rgba(56,189,248,0.00)');
+          ctx.fillStyle=gBody;
+          ctx.beginPath(); ctx.arc(pc.x,pc.y,outer,0,Math.PI*2); ctx.fill();
+
+          var gBand=ctx.createRadialGradient(pc.x,pc.y,rmwPx*0.82,pc.x,pc.y,rmwPx*1.26);
+          gBand.addColorStop(0.00,'rgba(255,255,255,0.00)');
+          gBand.addColorStop(0.34,'rgba(224,242,254,0.20)');
+          gBand.addColorStop(0.60,'rgba(125,211,252,0.35)');
+          gBand.addColorStop(1.00,'rgba(125,211,252,0.00)');
+          ctx.fillStyle=gBand;
+          ctx.beginPath(); ctx.arc(pc.x,pc.y,rmwPx*1.30,0,Math.PI*2); ctx.fill();
+
+          ctx.strokeStyle='rgba(191,219,254,0.45)';
+          ctx.lineWidth=1.2;
+          ctx.beginPath();
+          ctx.arc(pc.x,pc.y,rmwPx,0,Math.PI*2);
+          ctx.stroke();
+
+          ctx.font='bold 18px Microsoft YaHei';
+          ctx.fillStyle='rgba(240,249,255,0.92)';
+          ctx.fillText('\u98ce\u773c', pc.x-13, pc.y+5);
+          ctx.restore();
+        }
+
+        // 地震连续场：震中标记 + 几何衰减扩散环（虚线）。
+        if(S.layers.quake && Array.isArray(quake) && quake.length>=2){
+          var qx=Number(quake[0]), qy=Number(quake[1]);
+          var pq=worldToScreen(qx,qy);
+          ctx.save();
+          ctx.globalCompositeOperation='source-over';
+          ctx.setLineDash([8,8]);
+          for(var k=0;k<4;k++){
+            var r=36 + k*34 + 6*Math.sin(stepIdx*0.12 + k*0.8);
+            var alpha=0.36 - k*0.07;
+            ctx.strokeStyle='rgba(248,113,113,'+Math.max(alpha,0.08).toFixed(3)+')';
+            ctx.lineWidth=1.7 - k*0.2;
+            ctx.beginPath();
+            ctx.arc(pq.x,pq.y,r,0,Math.PI*2);
+            ctx.stroke();
+          }
+          ctx.setLineDash([]);
+          ctx.fillStyle='rgba(239,68,68,0.22)';
+          ctx.beginPath(); ctx.arc(pq.x,pq.y,10,0,Math.PI*2); ctx.fill();
+          ctx.font='bold 18px Microsoft YaHei';
+          ctx.fillStyle='rgba(254,202,202,0.95)';
+          ctx.fillText('💥', pq.x-9, pq.y+6);
+          ctx.restore();
+        }
+      }
+
+      function drawWindLayer(f, stepIdx){
+        var b=S.bounds; if(!b) return;
+        var nx=16, ny=16;
+        var dx=(b.maxX-b.minX)/nx, dy=(b.maxY-b.minY)/ny;
+        var windMax=0;
+        for(var i=0;i<f.nodes.length;i++) windMax=Math.max(windMax, Number(f.nodes[i].wind||0));
+        windMax=Math.max(windMax, Number(f.weather&&f.weather.wind||0), 1.0);
+
+        ctx.save();
+        for(var ix=0; ix<nx; ix++){
+          for(var iy=0; iy<ny; iy++){
+            var wx=b.minX + (ix+0.5)*dx;
+            var wy=b.minY + (iy+0.5)*dy;
+            var sw=sampleWeatherIDW(f, wx, wy);
+            var wn=clamp(sw.wind/windMax, 0, 1);
+            if(wn<=0.02) continue;
+
+            var p0=worldToScreen(wx-dx*0.5, wy-dy*0.5);
+            var p1=worldToScreen(wx+dx*0.5, wy+dy*0.5);
+            var w=Math.abs(p1.x-p0.x), h=Math.abs(p1.y-p0.y);
+            var x=Math.min(p0.x,p1.x), y=Math.min(p0.y,p1.y);
+            var a=0.02 + 0.14*wn;
+            ctx.fillStyle='rgba(226,232,240,'+a.toFixed(3)+')';
+            ctx.fillRect(x,y,w+0.6,h+0.6);
+
+            if(((ix+iy)&1)===0){
+              var c=worldToScreen(wx,wy);
+              var vv=Math.hypot(sw.vx, sw.vy);
+              var ux=(vv>1e-6)?(sw.vx/vv):1.0, uy=(vv>1e-6)?(sw.vy/vv):0.0;
+              var L=8 + 12*wn;
+              var x0=c.x-ux*L*0.5, y0=c.y-uy*L*0.5;
+              var x1=c.x+ux*L*0.5, y1=c.y+uy*L*0.5;
+              ctx.strokeStyle='rgba(241,245,249,'+(0.20+0.50*wn).toFixed(3)+')';
+              ctx.lineWidth=1.0;
+              ctx.beginPath();
+              ctx.moveTo(x0,y0);
+              ctx.lineTo(x1,y1);
+              ctx.stroke();
+
+              var ah=3.8;
+              ctx.fillStyle='rgba(241,245,249,'+(0.24+0.55*wn).toFixed(3)+')';
+              ctx.beginPath();
+              ctx.moveTo(x1,y1);
+              ctx.lineTo(x1-ux*ah-uy*ah*0.6, y1-uy*ah+ux*ah*0.6);
+              ctx.lineTo(x1-ux*ah+uy*ah*0.6, y1-uy*ah-ux*ah*0.6);
+              ctx.closePath();
+              ctx.fill();
+            }
+          }
+        }
+        ctx.restore();
+      }
+
+      function drawQuakeLayer(f, stepIdx){
+        ctx.save();
+        for(var i=0;i<f.nodes.length;i++){
+          var n=f.nodes[i], q=Number(n.quake||0);
+          if(q<=0.45) continue;
+          var p=worldToScreen(n.x,n.y);
+          var qa=clamp((q-0.45)/0.85,0,0.68);
+          var r=(7+11*qa)*(1+0.10*Math.sin(stepIdx*0.20+i*0.55));
+          ctx.strokeStyle='rgba(248,113,113,'+(0.22+qa*0.52).toFixed(3)+')';
+          ctx.lineWidth=1.15;
+          ctx.beginPath(); ctx.arc(p.x,p.y,r,0,Math.PI*2); ctx.stroke();
+        }
+        if(f.weather && Number.isFinite(f.weather.epicenterNode) && f.weather.epicenterNode>=0){
+          var epi=nodeById(f, Number(f.weather.epicenterNode));
+          if(epi){
+            var ep=worldToScreen(epi.x,epi.y);
+            var pulse=1+0.1*Math.sin(stepIdx*0.25);
+            ctx.strokeStyle='rgba(239,68,68,0.74)';
+            ctx.lineWidth=1.9;
+            var r1=(14+4*Math.sin(stepIdx*0.23))*pulse;
+            var r2=(24+7*Math.sin(stepIdx*0.23+0.8))*pulse;
+            var r3=(34+10*Math.sin(stepIdx*0.23+1.6))*pulse;
+            ctx.beginPath(); ctx.arc(ep.x,ep.y,r1,0,Math.PI*2); ctx.stroke();
+            ctx.beginPath(); ctx.arc(ep.x,ep.y,r2,0,Math.PI*2); ctx.stroke();
+            ctx.beginPath(); ctx.arc(ep.x,ep.y,r3,0,Math.PI*2); ctx.stroke();
+            ctx.fillStyle='rgba(239,68,68,0.16)';
+            ctx.beginPath(); ctx.arc(ep.x,ep.y,6,0,Math.PI*2); ctx.fill();
+          }
+        }
+        ctx.restore();
+      }
+
+      function drawHazards(f){
+        if(!f || !Array.isArray(f.nodes)) return;
+        var stepIdx = Number(f.step||S.idx);
+        drawGlobalHazardFields(f, stepIdx);
+        if(S.layers.rain) drawRainLayer(f, stepIdx);
+        if(S.layers.wind) drawWindLayer(f, stepIdx);
+        if(S.layers.quake) drawQuakeLayer(f, stepIdx);
+      }
+
+      function drawTask(t,stepIdx){
+        var p=worldToScreen(t.x,t.y);
+        var selected=S.selected && S.selected.kind==='task' && S.selected.id===t.id;
+        var st=String(t.status||'pending');
+        var isEmer=(t.type==='emergency');
+
+        var color='#ef4444';
+        if(st==='claimed') color='#f59e0b';
+        else if(st==='serving') color='#fbbf24';
+        else if(st==='done') color='#22c55e';
+        else if(st==='failed') color='#6b7280';
+
+        ctx.save();
+        var phase=Number(t._ph||0), pulse=1+0.16*Math.sin(stepIdx*0.14+phase);
+        var r0=13*pulse;
+        if(st==='serving') r0=15*pulse;
+        if(st==='done') r0=10;
+
+        ctx.strokeStyle=selected?'#fde68a':color;
+        ctx.lineWidth=selected?3.0:2.2;
+        ctx.beginPath(); ctx.arc(p.x,p.y,r0,0,Math.PI*2); ctx.stroke();
+
+        ctx.fillStyle=color;
+        if(isEmer){
+          // Emergency: cross box
+          ctx.fillRect(p.x-7,p.y-7,14,14);
+          ctx.fillStyle='rgba(255,255,255,0.95)';
+          ctx.fillRect(p.x-1.6,p.y-5.0,3.2,10.0);
+          ctx.fillRect(p.x-5.0,p.y-1.6,10.0,3.2);
+        } else {
+          // Normal: package diamond
+          ctx.beginPath();
+          ctx.moveTo(p.x, p.y-8);
+          ctx.lineTo(p.x+8, p.y);
+          ctx.lineTo(p.x, p.y+8);
+          ctx.lineTo(p.x-8, p.y);
+          ctx.closePath();
+          ctx.fill();
+        }
+
+        if(st==='serving' && Number.isFinite(t.serviceRemaining)){
+          ctx.fillStyle='rgba(255,255,255,0.95)';
+          ctx.font='bold 10px Microsoft YaHei';
+          var txt='-'+String(t.serviceRemaining);
+          ctx.fillText(txt, p.x+8, p.y-8);
+        }
+
+        if(st==='done'){
+          ctx.fillStyle='rgba(187,247,208,0.95)';
+          ctx.font='bold 12px Microsoft YaHei';
+          ctx.fillText('\u2713', p.x-3, p.y+4);
+        }
+        if(st==='failed'){
+          ctx.fillStyle='rgba(248,113,113,0.95)';
+          ctx.font='bold 12px Microsoft YaHei';
+          ctx.fillText('\u2715', p.x-4, p.y+4);
+        }
+
+        if(selected){ ctx.strokeStyle='#fde68a'; ctx.lineWidth=2.0; ctx.beginPath(); ctx.arc(p.x,p.y,18,0,Math.PI*2); ctx.stroke(); }
+        ctx.restore();
+        S.hits.push({kind:'task',id:t.id,x:p.x,y:p.y,r:17});
+      }
+
+      function drawAgent(a,f){
+        var isTruck=(a.type==='truck' || a.kind==='truck');
+        var w=agentWorldPos(a,f); a.__x=w.x; a.__y=w.y;
+        var p=worldToScreen(w.x,w.y);
+        var selected=S.selected && S.selected.kind==='agent' && S.selected.id===a.id;
+
+        ctx.save();
+        if(isTruck){
+          var truckW=34, truckH=24;
+          ctx.fillStyle=selected?'#86efac':'#34d399';
+          ctx.fillRect(p.x-truckW*0.5,p.y-truckH*0.5,truckW,truckH);
+          ctx.strokeStyle=selected?'#d1fae5':'#0f766e';
+          ctx.lineWidth=1.6;
+          ctx.strokeRect(p.x-truckW*0.5,p.y-truckH*0.5,truckW,truckH);
+          var piggy=0;
+          for(var ai=0; ai<f.agents.length; ai++){
+            var aa=f.agents[ai];
+            if((aa.type==='uav' || aa.kind==='uav') && typeof aa.mode==='string' && aa.mode.indexOf('piggyback_'+a.id)===0){
+              piggy++;
+            }
+          }
+          if(piggy>0){
+            for(var pi=0; pi<Math.min(piggy,4); pi++){
+              ctx.beginPath();
+              ctx.fillStyle='#f59e0b';
+              ctx.arc(p.x-8+pi*6, p.y-truckH*0.5-5, 2.2, 0, Math.PI*2);
+              ctx.fill();
+            }
+            if(piggy>4){
+              ctx.fillStyle='#fef3c7';
+              ctx.font='10px Microsoft YaHei';
+              ctx.fillText('+'+String(piggy-4), p.x+7, p.y-truckH*0.5-2);
+            }
+          }
+        } else {
+          var radius=(Number(a.deliveryRadius)||80);
+          var rp=Math.max(8, worldToScreen(w.x+radius,w.y).x - p.x);
+          ctx.fillStyle=selected?'#67e8f9':'#22d3ee';
+          ctx.beginPath(); ctx.arc(p.x,p.y,8.0,0,Math.PI*2); ctx.fill();
+          ctx.strokeStyle='rgba(34,211,238,.45)'; ctx.lineWidth=1.3;
+          ctx.beginPath(); ctx.arc(p.x,p.y,rp,0,Math.PI*2); ctx.stroke();
+        }
+        ctx.fillStyle='#e5e7eb'; ctx.font='11px Microsoft YaHei'; ctx.fillText(a.id,p.x+9,p.y-9);
+        if(selected){ ctx.strokeStyle='#fde68a'; ctx.lineWidth=2.2; ctx.beginPath(); ctx.arc(p.x,p.y,13.5,0,Math.PI*2); ctx.stroke(); }
+        ctx.restore();
+
+        S.hits.push({kind:'agent',id:a.id,x:p.x,y:p.y,r:isTruck?22:16});
+      }
+
+      function updateTop(){
+        D.stepText.textContent='Step: '+S.idx+' / '+Math.max(0,S.frames.length-1);
+        D.btnPlay.textContent=S.playing?'[ 暂停 ]':'[ 播放 ]';
+        D.zoomText.textContent=(100*S.view.zoom).toFixed(0)+'%';
+      }
+
+      function updateLeft(f){
+        D.rain.textContent=fmt(f.weather.rainfall,2);
+        D.wind.textContent=fmt(f.weather.wind,2);
+        D.comm.textContent=pct(f.weather.commBlockRate);
+        D.risk.textContent=f.weather.riskSpike?'警报':'正常';
+        D.risk.className='chip '+(f.weather.riskSpike?'danger':'ok');
+
+        var nd=f.metrics.normalDelivered, nt=f.metrics.normalTotal;
+        var ed=f.metrics.emergencyDelivered, et=f.metrics.emergencyTotal;
+        D.normalText.textContent=nd+'/'+nt;
+        D.emerText.textContent=ed+'/'+et;
+        D.normalBar.style.width=((nt?100*nd/nt:0).toFixed(1))+'%';
+        D.emerBar.style.width=((et?100*ed/et:0).toFixed(1))+'%';
+        D.dock.textContent=String(f.metrics.dockingCount);
+        D.reward.textContent=fmt(f.metrics.avgReward,3);
+        D.invalid.textContent=String(f.metrics.invalidActionCount);
+      }
+
+      function numOr(v, d){ return Number.isFinite(v)?v:d; }
+
+      function updateInspector(f){
+        if(!S.selected){ D.inspector.style.color='#9ca3af'; D.inspector.innerHTML='请在地图上点击实体查看状态。'; return; }
+        D.inspector.style.color='#e5e7eb';
+
+        if(S.selected.kind==='agent'){
+          var a=null;
+          for(var i=0;i<f.agents.length;i++){ if(f.agents[i].id===S.selected.id){ a=f.agents[i]; break; } }
+          if(!a){ D.inspector.innerHTML='实体不存在'; return; }
+
+          if(a.type==='uav'){
+            var b=clamp(Number(a.battery||0),0,1);
+            var sp=Math.hypot(Number(a.vx||0),Number(a.vy||0));
+            var cls='bar-green', col='#6ee7b7';
+            if(b<0.2){ cls='bar-danger'; col='#f87171'; }
+            else if(b<0.5){ cls='bar-amber'; col='#fbbf24'; }
+            D.inspector.innerHTML =
+              "<div class='kv'><div class='k'>类型</div><div class='v'>UAV</div></div>"+
+              "<div class='kv'><div class='k'>ID</div><div class='v'>"+a.id+"</div></div>"+
+              "<div class='kv'><div class='k'>位置</div><div class='v'>("+fmt(numOr(a.__x,a.x),1)+", "+fmt(numOr(a.__y,a.y),1)+")</div></div>"+
+              "<div class='kv'><div class='k'>速度</div><div class='v'>vx="+fmt(a.vx||0,2)+", vy="+fmt(a.vy||0,2)+", |v|="+fmt(sp,2)+"</div></div>"+
+              "<div class='kv'><div class='k'>通信</div><div class='v'><span class='chip "+(a.inBlackout?'danger':'ok')+"'>"+(a.inBlackout?'阻断':'正常')+"</span></div></div>"+
+              "<div class='kv'><div class='k'>模式</div><div class='v'>"+(a.mode||'飞行')+"</div></div>"+
+              "<div class='kv'><div class='k'>动作</div><div class='v'>"+(a.actionText||'-')+"</div></div>"+
+              "<div class='kv'><div class='k'>目标任务</div><div class='v'>"+(a.targetTaskId||'-')+"</div></div>"+
+              "<div class='kv'><div class='k'>目标坐标</div><div class='v'>"+(Number.isFinite(a.targetX)&&Number.isFinite(a.targetY)?('('+fmt(a.targetX,1)+', '+fmt(a.targetY,1)+')'):'-')+"</div></div>"+
+              "<div class='kv'><div class='k'>任务完成半径</div><div class='v'>"+fmt(Number(a.deliveryRadius||0),1)+" m</div></div>"+
+              "<div style='margin-top:8px;border:1px solid #374151;border-radius:10px;padding:10px;background:#20242b'>"+
+                "<div style='font-size:22px;font-weight:800;color:"+col+";margin-bottom:8px'>电量 "+fmt(100*b,1)+"%</div>"+
+                "<div class='prog'><div class='bar "+cls+"' style='width:"+(100*b).toFixed(1)+"%'></div></div>"+
+              "</div>";
+            return;
+          }
+
+          D.inspector.innerHTML =
+            "<div class='kv'><div class='k'>类型</div><div class='v'>Truck</div></div>"+
+            "<div class='kv'><div class='k'>ID</div><div class='v'>"+a.id+"</div></div>"+
+            "<div class='kv'><div class='k'>道路锁定位置</div><div class='v'>("+fmt(numOr(a.__x,a.x),1)+", "+fmt(numOr(a.__y,a.y),1)+")</div></div>"+
+            "<div class='kv'><div class='k'>当前节点</div><div class='v'>"+(Number.isFinite(a.node)?a.node:'-')+"</div></div>"+
+            "<div class='kv'><div class='k'>目标节点</div><div class='v'>"+(Number.isFinite(a.targetNode)?a.targetNode:'-')+"</div></div>"+
+            "<div class='kv'><div class='k'>动作</div><div class='v'>"+(a.actionText||'-')+"</div></div>"+
+            "<div class='kv'><div class='k'>下一步节点</div><div class='v'>"+(Number.isFinite(a.nextNode)?a.nextNode:'-')+"</div></div>"+
+            "<div class='kv'><div class='k'>移动进度</div><div class='v'>"+fmt(100*(a.progress||0),1)+"%</div></div>"+
+            "<div class='prog'><div class='bar bar-blue' style='width:"+(100*(a.progress||0)).toFixed(1)+"%'></div></div>";
+          return;
+        }
+        if(S.selected.kind==='task'){
+          var t=null;
+          for(var j=0;j<f.tasks.length;j++){ if(f.tasks[j].id===S.selected.id){ t=f.tasks[j]; break; } }
+          if(!t){ D.inspector.innerHTML='\u4efb\u52a1\u4e0d\u5b58\u5728'; return; }
+          var tp=(t.type==='emergency'?'\u7d27\u6025':'\u666e\u901a');
+          var st='<span class="chip danger">\u5f85\u6267\u884c</span>';
+          if(t.status==='claimed') st='<span class="chip warn">\u5df2\u63a5\u5355</span>';
+          else if(t.status==='serving') st='<span class="chip warn">\u4ea4\u4ed8\u4e2d</span>';
+          else if(t.status==='done') st='<span class="chip ok">\u5df2\u5b8c\u6210</span>';
+          else if(t.status==='failed') st='<span class="chip danger">\u5931\u8d25</span>';
+
+          D.inspector.innerHTML =
+            "<div class='kv'><div class='k'>\u7c7b\u578b</div><div class='v'>\u4efb\u52a1</div></div>"+
+            "<div class='kv'><div class='k'>ID</div><div class='v'>"+t.id+"</div></div>"+
+            "<div class='kv'><div class='k'>\u7c7b\u522b</div><div class='v'>"+tp+"</div></div>"+
+            "<div class='kv'><div class='k'>Deadline</div><div class='v'>"+t.deadline+"</div></div>"+
+            "<div class='kv'><div class='k'>\u72b6\u6001</div><div class='v'>"+st+"</div></div>"+
+            "<div class='kv'><div class='k'>\u63a8\u8350</div><div class='v'>"+(t.recommendedFor||'-')+"</div></div>"+
+            "<div class='kv'><div class='k'>\u63a5\u5355\u8005</div><div class='v'>"+(t.assignedTo||'-')+"</div></div>"+
+            "<div class='kv'><div class='k'>\u6267\u884c\u8005</div><div class='v'>"+(t.inServiceBy||'-')+"</div></div>"+
+            "<div class='kv'><div class='k'>\u5269\u4f59\u56de\u5408</div><div class='v'>"+(Number.isFinite(t.serviceRemaining)?t.serviceRemaining:'-')+"</div></div>"+
+            "<div class='kv'><div class='k'>\u5b8c\u6210\u8005</div><div class='v'>"+(t.deliveredBy||'-')+"</div></div>"+
+            "<div style='margin-top:8px;color:#fbbf24;font-size:12px'>\u8bf4\u660e\uff1a\u7d27\u6025\u4efb\u52a1\u5230\u70b9\u540e\u9700\u8fde\u7eed\u5378\u8d275\u56de\u5408\uff0c\u666e\u901a\u4efb\u52a1\u9700\u5378\u8d2710\u56de\u5408\u3002</div>";
+          return;
+        }
+
+        if(S.selected.kind==='node'){
+          var n=nodeById(f,S.selected.id);
+          var nodeId = n ? Number(n.id) : Number(S.selected.id);
+          var degree=0, blockedDeg=0;
+          for(var ei=0; ei<f.edges.length; ei++){
+            var ee=f.edges[ei];
+            if(Number(ee.a)===nodeId || Number(ee.b)===nodeId){ degree++; if(ee.blocked) blockedDeg++; }
+          }
+          var pending=0, serving=0, done=0;
+          for(var ti=0; ti<f.tasks.length; ti++){
+            var tt=f.tasks[ti];
+            if(Number(tt.demandNode)===nodeId){
+              if(tt.status==='done') done++;
+              else if(tt.status==='serving') serving++;
+              else pending++;
+            }
+          }
+          D.inspector.innerHTML =
+            "<div class='kv'><div class='k'>类型</div><div class='v'>节点</div></div>"+
+            "<div class='kv'><div class='k'>ID</div><div class='v'>"+(n?n.id:S.selected.id)+"</div></div>"+
+            "<div class='kv'><div class='k'>坐标</div><div class='v'>"+(n?('('+fmt(n.x,1)+', '+fmt(n.y,1)+')'):'-')+"</div></div>"+
+            "<div class='kv'><div class='k'>降雨</div><div class='v'>"+(n?fmt(n.rain||0,2):'-')+" mm/h</div></div>"+
+            "<div class='kv'><div class='k'>风速</div><div class='v'>"+(n?fmt(n.wind||0,2):'-')+" m/s</div></div>"+
+            "<div class='kv'><div class='k'>风向分量</div><div class='v'>"+(n?('wx='+fmt(n.wx||0,2)+', wy='+fmt(n.wy||0,2)):'-')+"</div></div>"+
+            "<div class='kv'><div class='k'>震动</div><div class='v'>"+(n?fmt(n.quake||0,2):'-')+"</div></div>"+
+            "<div class='kv'><div class='k'>连接道路</div><div class='v'>"+degree+"</div></div>"+
+            "<div class='kv'><div class='k'>阻断道路</div><div class='v'>"+blockedDeg+"</div></div>"+
+            "<div class='kv'><div class='k'>节点任务</div><div class='v'>待执行"+pending+" / 交付中"+serving+" / 完成"+done+"</div></div>";
+          return;
+        }
+
+        if(S.selected.kind==='edge'){
+          var e2=null;
+          for(var k=0;k<f.edges.length;k++){ if(f.edges[k].id===S.selected.id){ e2=f.edges[k]; break; } }
+          D.inspector.innerHTML =
+            "<div class='kv'><div class='k'>类型</div><div class='v'>道路</div></div>"+
+            "<div class='kv'><div class='k'>ID</div><div class='v'>"+(e2?e2.id:S.selected.id)+"</div></div>"+
+            "<div class='kv'><div class='k'>长度</div><div class='v'>"+(e2&&Number.isFinite(e2.length_m)?(Math.round(e2.length_m)+' m'):'-')+"</div></div>"+
+            "<div class='kv'><div class='k'>端点</div><div class='v'>"+(e2?(e2.a+' ↔ '+e2.b):'-')+"</div></div>"+
+            "<div class='kv'><div class='k'>状态</div><div class='v'>"+(e2&&e2.blocked?"<span class='chip danger'>阻断</span>":"<span class='chip ok'>畅通</span>")+"</div></div>"+
+            "<div class='kv'><div class='k'>当步断裂概率</div><div class='v'>"+(e2?fmt(100*(e2.step_block_prob||0),2)+'%':'-')+"</div></div>"+
+            "<div class='kv'><div class='k'>粗糙度</div><div class='v'>"+(e2?fmt(e2.roughness_norm||0,3):'-')+"</div></div>"+
+            "<div class='kv'><div class='k'>建筑密度</div><div class='v'>"+(e2?fmt(e2.building_density_norm||0,3):'-')+"</div></div>"+
+            "<div class='kv'><div class='k'>桥隧瓶颈</div><div class='v'>"+(e2?fmt(e2.infra_bottleneck_norm||0,3):'-')+"</div></div>"+
+            "<div class='kv'><div class='k'>基础易损性</div><div class='v'>"+(e2?fmt(e2.base_vulnerability||0,3):'-')+"</div></div>";
+        }
+      }
+
+      function updateAgentActions(f){
+        var box = D.agentActions;
+        if(!box) return;
+        var agents = (f && Array.isArray(f.agents)) ? f.agents : [];
+        if(!agents.length){
+          box.className='event-none';
+          box.textContent='暂无动作数据。';
+          return;
+        }
+        box.className='event-list';
+        var html='';
+        for(var i=0;i<agents.length;i++){
+          var a=agents[i];
+          if(a.type==='truck'){
+            html += "<div class='event-item'><strong>"+a.id+"</strong>："+
+              "动作="+(a.actionText||'待命')+"；下一节点="+(Number.isFinite(a.nextNode)?a.nextNode:'-')+
+              "；进度="+fmt(100*(Number(a.progress||0)),1)+"%</div>";
+          } else {
+            var tgt = (Number.isFinite(a.targetX)&&Number.isFinite(a.targetY))
+              ? ("("+fmt(a.targetX,1)+", "+fmt(a.targetY,1)+")")
+              : "-";
+            html += "<div class='event-item'><strong>"+a.id+"</strong>："+
+              "动作="+(a.actionText||'待命')+"；目标="+tgt+
+              "；任务="+(a.targetTaskId||'-')+"</div>";
+          }
+        }
+        box.innerHTML = html;
+      }
+
+
+
+      function updateKeyEvents(f){
+        var box = D.keyEvents;
+        if(!box) return;
+        var events = (f && Array.isArray(f.keyEvents)) ? f.keyEvents : [];
+        if(!events.length){
+          box.className='event-none';
+          box.textContent='\u672c\u6b65\u65e0\u5173\u952e\u4e8b\u4ef6\u3002';
+          return;
+        }
+        box.className='event-list';
+        var html='';
+        for(var i=0;i<events.length;i++){
+          html += "<div class='event-item'><strong>\u2022</strong> " + String(events[i]) + "</div>";
+        }
+        box.innerHTML=html;
+      }
+
+      function render(){
+        if(!S.frames.length) return;
+        var f=S.frames[S.idx];
+        S.hits=[];
+        clearCanvas();
+        drawHazards(f);
+        for(var i=0;i<f.edges.length;i++) drawEdge(f.edges[i],f);
+        for(var j=0;j<f.nodes.length;j++) drawNode(f.nodes[j]);
+        for(var k=0;k<f.tasks.length;k++) drawTask(f.tasks[k],f.step||S.idx);
+        for(var m=0;m<f.agents.length;m++) drawAgent(f.agents[m],f);
+        updateTop();
+        updateLeft(f);
+        updateInspector(f);
+        updateAgentActions(f);
+        updateKeyEvents(f);
+      }
+
+      function setStep(i){ S.idx=clamp(i,0,S.frames.length-1); render(); }
+      function prevStep(){ setStep(S.idx-1); }
+      function nextStep(){ setStep(S.idx+1); }
+      function togglePlay(){
+        S.playing=!S.playing;
+        if(S.playing){ S.timer=setInterval(function(){ S.idx=(S.idx+1)%S.frames.length; render(); },700); }
+        else { if(S.timer) clearInterval(S.timer); S.timer=null; }
+        updateTop();
+      }
+
+      function bindLayerToggles(){
+        function syncBtn(btn,on){ if(!btn) return; btn.classList.toggle('active', !!on); }
+        function setLayer(name,val){
+          S.layers[name]=!!val;
+          syncBtn(D.btnLayerRain, S.layers.rain);
+          syncBtn(D.btnLayerWind, S.layers.wind);
+          syncBtn(D.btnLayerQuake, S.layers.quake);
+          render();
+        }
+        D.btnLayerRain.onclick=function(){ setLayer('rain', !S.layers.rain); };
+        D.btnLayerWind.onclick=function(){ setLayer('wind', !S.layers.wind); };
+        D.btnLayerQuake.onclick=function(){ setLayer('quake', !S.layers.quake); };
+        setLayer('rain', true);
+        setLayer('wind', true);
+        setLayer('quake', true);
+      }
+
+      function bindSplitters(){
+        var mode='';
+        D.splitLeft.onmousedown=function(){ mode='L'; };
+        D.splitRight.onmousedown=function(){ mode='R'; };
+        window.addEventListener('mousemove',function(e){
+          if(!mode) return;
+          var rect=D.mainWrap.getBoundingClientRect();
+          if(mode==='L'){ D.left.style.width=clamp(e.clientX-rect.left,220,560)+'px'; }
+          else { D.right.style.width=clamp(rect.right-e.clientX,250,560)+'px'; }
+          resizeCanvas();
+        });
+        window.addEventListener('mouseup',function(){ mode=''; });
+      }
+
+      function bindCanvas(){
+        var dragging=false,lastX=0,lastY=0;
+        D.canvas.addEventListener('mousedown',function(e){ dragging=true; lastX=e.clientX; lastY=e.clientY; D.canvas.classList.add('drag'); });
+        window.addEventListener('mousemove',function(e){
+          if(!dragging) return;
+          S.view.panX += e.clientX-lastX;
+          S.view.panY += e.clientY-lastY;
+          lastX=e.clientX; lastY=e.clientY;
+          render();
+        });
+        window.addEventListener('mouseup',function(){ dragging=false; D.canvas.classList.remove('drag'); });
+        D.canvas.addEventListener('wheel',function(e){
+          e.preventDefault();
+          var r=D.canvas.getBoundingClientRect(), sx=e.clientX-r.left, sy=e.clientY-r.top;
+          var w=screenToWorld(sx,sy);
+          S.view.zoom=clamp(S.view.zoom*(e.deltaY<0?1.08:0.92),0.35,3);
+          D.zoomRange.value=S.view.zoom.toFixed(2);
+          var p=worldToScreen(w.x,w.y);
+          S.view.panX += sx-p.x;
+          S.view.panY += sy-p.y;
+          render();
+        }, { passive:false });
+
+        D.canvas.addEventListener('click',function(e){
+          var r=D.canvas.getBoundingClientRect(), x=e.clientX-r.left, y=e.clientY-r.top;
+          var best=null, bd=Infinity;
+          for(var i=S.hits.length-1;i>=0;i--){
+            var h=S.hits[i], dd=dist2(x,y,h.x,h.y);
+            if(dd<=h.r*h.r && dd<bd){ bd=dd; best=h; }
+          }
+          S.selected=best?{kind:best.kind,id:best.id}:null;
+          render();
+        });
+      }
+
+      function buildMockFrames(){
+        var nodes=[
+          {id:0,x:2500,y:2500},{id:1,x:1700,y:2100},{id:2,x:3200,y:2300},{id:3,x:1200,y:3000},
+          {id:4,x:3800,y:3000},{id:5,x:1500,y:1400},{id:6,x:3500,y:1400},{id:7,x:2500,y:3600},{id:8,x:2400,y:900}
+        ];
+        var edgePairs=[[0,1],[0,2],[0,5],[0,6],[0,7],[0,8],[1,3],[2,4],[5,8],[6,8],[3,7],[4,7],[5,1],[6,2]];
+        var taskBase=[
+          {id:'task_n_0',type:'normal',nodeId:3,deadline:8,status:'active',assignedTo:'truck_0',recommendedFor:'truck_0',_ph:0.3},
+          {id:'task_n_1',type:'normal',nodeId:4,deadline:9,status:'active',assignedTo:'truck_1',recommendedFor:'truck_1',_ph:1.1},
+          {id:'task_e_0',type:'emergency',nodeId:8,deadline:5,status:'active',assignedTo:'uav_0',recommendedFor:'uav_0',_ph:2.5},
+          {id:'task_e_1',type:'emergency',nodeId:7,deadline:7,status:'active',assignedTo:'uav_1',recommendedFor:'uav_1',_ph:3.4}
+        ];
+
+        function N(id){ for(var i=0;i<nodes.length;i++){ if(nodes[i].id===id) return nodes[i]; } return nodes[0]; }
+        function lerp(a,b,t){ return {x:a.x+(b.x-a.x)*t, y:a.y+(b.y-a.y)*t}; }
+
+        var frames=[], T=10;
+        for(var s=0;s<T;s++){
+          var t=s/(T-1);
+          var tp0=lerp(N(0),N(3),Math.min(1,t*1.08));
+          var tp1=lerp(N(0),N(4),Math.min(1,t*0.92));
+          var u0=lerp(N(0),N(8),Math.min(1,t*1.35));
+          var u1=lerp(N(0),N(7),Math.min(1,t*1.15));
+          var u2=lerp(N(5),N(6),Math.min(1,t*0.75));
+
+          var edges=[];
+          for(var ei=0;ei<edgePairs.length;ei++){
+            var p=edgePairs[ei];
+            edges.push({ id:'e_'+p[0]+'_'+p[1], a:p[0], b:p[1], blocked:(ei===2&&s>=3)||(ei===10&&s>=6)||(ei===11&&s>=7) });
+          }
+
+          var tasks=[];
+          for(var qi=0;qi<taskBase.length;qi++){
+            var q=taskBase[qi], st='active';
+            if(q.id==='task_n_0'&&s>=7) st='done';
+            if(q.id==='task_n_1'&&s>=8) st='done';
+            if(q.id==='task_e_0'&&s>=4) st='done';
+            if(q.id==='task_e_1'&&s>=6) st='done';
+            var nn=N(q.nodeId);
+            tasks.push({ id:q.id,type:q.type,nodeId:q.nodeId,deadline:q.deadline,status:st,assignedTo:q.assignedTo,recommendedFor:q.recommendedFor,_ph:q._ph,x:nn.x,y:nn.y });
+          }
+
+          var agents=[
+            {id:'truck_0',type:'truck',x:tp0.x,y:tp0.y,node:s<8?0:3,targetNode:3,progress:Math.min(1,t*1.08),vx:(N(3).x-N(0).x)/10,vy:(N(3).y-N(0).y)/10,inBlackout:false,mode:'行驶'},
+            {id:'truck_1',type:'truck',x:tp1.x,y:tp1.y,node:s<9?0:4,targetNode:4,progress:Math.min(1,t*0.92),vx:(N(4).x-N(0).x)/12,vy:(N(4).y-N(0).y)/12,inBlackout:s>=7,mode:'行驶'},
+            {id:'uav_0',type:'uav',x:u0.x,y:u0.y,deliveryRadius:80,vx:(N(8).x-N(0).x)/6.5,vy:(N(8).y-N(0).y)/6.5,battery:clamp(0.92-0.075*s,0,1),inBlackout:s>=6&&s<=8,mode:s>=4?'返航':'任务中'},
+            {id:'uav_1',type:'uav',x:u1.x,y:u1.y,deliveryRadius:80,vx:(N(7).x-N(0).x)/8,vy:(N(7).y-N(0).y)/8,battery:clamp(0.88-0.06*s,0,1),inBlackout:s>=5&&s<=7,mode:s>=6?'悬停充电':'任务中'},
+            {id:'uav_2',type:'uav',x:u2.x,y:u2.y,deliveryRadius:80,vx:(N(6).x-N(5).x)/12,vy:(N(6).y-N(5).y)/12,battery:clamp(0.65-0.035*s,0,1),inBlackout:false,mode:s>=7?'待命':'侦察'}
+          ];
+
+          var nd=0, ed=0;
+          for(var ti=0;ti<tasks.length;ti++){ if(tasks[ti].status==='done'){ if(tasks[ti].type==='normal') nd++; else ed++; } }
+
+          frames.push({
+            step:s,
+            nodes:nodes,
+            edges:edges,
+            tasks:tasks,
+            agents:agents,
+            weather:{ rainfall:8+4.2*Math.sin(s*0.55+0.6), wind:4+2.6*Math.cos(s*0.42), commBlockRate:clamp(0.04+0.06*s/(T-1),0,0.25), riskSpike:(s===4||s===7), epicenterNode:(s%nodes.length), stormCenter:[2500+420*Math.cos(0.5*s),2500+380*Math.sin(0.42*s)], rmw:420, quakeEpicenter:[1500+220*Math.sin(0.35*s),2000+210*Math.cos(0.28*s)] },
+            metrics:{ normalDelivered:nd, normalTotal:2, emergencyDelivered:ed, emergencyTotal:2, dockingCount:(s<5?1:(s<8?3:5)), avgReward:-0.12+0.08*s+0.02*Math.sin(0.7*s), invalidActionCount:(s<4?2:(s<7?4:6)) }
+          });
+        }
+        for(var si=0; si<frames.length; si++){
+          var fr=frames[si];
+          var nn=[];
+          for(var ni=0; ni<nodes.length; ni++){
+            var n0=nodes[ni];
+            var ph=0.23*si+ni*0.41;
+            var wx=2.0*Math.cos(ph), wy=2.0*Math.sin(ph+0.7);
+            nn.push({
+              id:n0.id, x:n0.x, y:n0.y,
+              rain:7.5+3.0*Math.sin(ph+0.8),
+              wind:Math.hypot(wx,wy)+3.2,
+              quake:0.18+0.55*Math.max(0, Math.sin(ph-1.0)),
+              wx:wx, wy:wy
+            });
+          }
+          fr.nodes=nn;
+        }
+        return frames;
+      }
+
+      function loadFrames(data){
+        if(Array.isArray(data)) return data;
+        if(data && Array.isArray(data.frames)) return data.frames;
+        return null;
+      }
+
+      function init(){
+        S.frames = loadFrames(window.__HETGAT_DATA__) || buildMockFrames();
+        var ns=S.frames[0].nodes;
+        var minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;
+        for(var i=0;i<ns.length;i++){
+          minX=Math.min(minX,ns[i].x); maxX=Math.max(maxX,ns[i].x);
+          minY=Math.min(minY,ns[i].y); maxY=Math.max(maxY,ns[i].y);
+        }
+        S.bounds={minX:minX,maxX:maxX,minY:minY,maxY:maxY};
+
+        D.btnPrev.onclick=prevStep;
+        D.btnNext.onclick=nextStep;
+        D.btnPlay.onclick=togglePlay;
+        D.zoomRange.oninput=function(){ S.view.zoom=Number(D.zoomRange.value); render(); };
+        bindLayerToggles();
+
+        bindSplitters();
+        bindCanvas();
+        window.addEventListener('resize', resizeCanvas);
+
+        window.HetGATViewer = {
+          loadFrames: function(payload){
+            var f=loadFrames(payload);
+            if(!f || !f.length) return false;
+            S.frames=f; S.idx=0; S.selected=null;
+            var n=f[0].nodes, mnX=Infinity,mxX=-Infinity,mnY=Infinity,mxY=-Infinity;
+            for(var i=0;i<n.length;i++){
+              mnX=Math.min(mnX,n[i].x); mxX=Math.max(mxX,n[i].x);
+              mnY=Math.min(mnY,n[i].y); mxY=Math.max(mxY,n[i].y);
+            }
+            S.bounds={minX:mnX,maxX:mxX,minY:mnY,maxY:mxY};
+            render();
+            return true;
+          },
+          setLayerVisible: function(name, visible){
+            if(name!=='rain' && name!=='wind' && name!=='quake') return false;
+            S.layers[name]=!!visible;
+            if(name==='rain') D.btnLayerRain.classList.toggle('active', !!visible);
+            if(name==='wind') D.btnLayerWind.classList.toggle('active', !!visible);
+            if(name==='quake') D.btnLayerQuake.classList.toggle('active', !!visible);
+            render();
+            return true;
+          }
+        };
+
+        resizeCanvas();
+        render();
+      }
+
+      init();
+    })();
+  </script>
+</body>
+</html>
+
+
