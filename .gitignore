@@ -1,0 +1,29 @@
+﻿# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+
+# Env & IDE
+.env
+.venv/
+.vscode/
+.idea/
+
+# Logs
+*.log
+
+# Model weights / checkpoints
+*.pt
+*.pth
+*.ckpt
+*.onnx
+
+# Artifacts / generated outputs
+training_results/
+artifacts/
+
+# OS
+.DS_Store
+Thumbs.db
